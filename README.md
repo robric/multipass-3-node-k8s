@@ -1887,3 +1887,25 @@ ubuntu@vm1:~$ kubectl logs -n metallb-system speaker-gq27n  | grep -i arp
 {"caller":"announcer.go:126","event":"createARPResponder","interface":"ens3.100","level":"info","msg":"created ARP responder for interface","ts":"2024-06-12T12:31:56Z"}
 
 ```
+
+### Issues
+
+After deletion/recreation, the metallb svc is easily stuck in pending state.
+
+'''
+ubuntu@vm1:~$ kubectl  get svc
+NAME                  TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                        AGE
+ipsec-vip             LoadBalancer   10.43.158.165   <pending>     500:32572/UDP,4500:31479/UDP   75s
+kubernetes            ClusterIP      10.43.0.1       <none>        443/TCP                        12d
+sctp-server-vip1234   LoadBalancer   10.43.212.209   1.2.3.4       10000:30711/SCTP               10d
+ubuntu@vm1:~$ 
+'''
+
+I managed to have things working by 
+- deleting svc, metallb l2advertisment and ipaddresspool 
+- flusing arp entry for VIP: 10.123.123.200 
+
+```
+ubuntu@vm2:~$ sudo arp -d 10.123.123.200
+ubuntu@vm2:~$ 
+```

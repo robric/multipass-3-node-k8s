@@ -3,24 +3,47 @@ kind: ConfigMap
 metadata:
   name: ipsec-config
 data:
-  ipsec.conf: |-
-    config setup
-        charondebug="ike 2, knl 2, cfg 2"
+  swanctl.conf: |-
+    connections {
+      tunnel-accept-any {
+        local_addrs  = %any
+        remote_addrs = %any
+        local {
+          auth = psk
+          id = myserver
+        }
+        remote {
+          auth = psk
+          id = myclient
+        }
+        children {
+          net-net {
+            if_id_out = 123
+            if_id_in = 123
+            mode = tunnel
+            local_ts  = 0.0.0.0/0
+            remote_ts = 0.0.0.0/0
+            esp_proposals = aes128gcm128
+            start_action = start
+          }
+        }
+        version = 2
+        mobike = no
+        reauth_time = 10800
+        proposals = aes128-sha256-modp3072
+      }
+    }
+    secrets {
+      ike-1 {
+        id-1 = myserver
+        id-2 = myclient
+        secret = "verysecure"
+      }
+    }
 
-    conn mytunnel
-        authby=secret
-        left=%defaultroute
-        leftid=@myserver
-        leftsubnet=0.0.0.0/0
-        right=%any
-        rightid=%any
-        rightsubnet=0.0.0.0/0
-        auto=start
-  ipsec.secrets: |-
-    @myserver @myclient : PSK "verysecure"
   strongswan.conf: |-
     charon {
-      install_routes = no
+      install_routes = yes
       send_vendor_id = yes
       dns1 = 8.8.8.8
       dns2 = 8.8.4.4
@@ -92,10 +115,15 @@ spec:
         command: ["/bin/sh"]
         args: ["-c", "apt-get update && \
          apt-get install -y strongswan && \
-         cp /etc/ipsec.conf-tmp /etc/ipsec.conf && \
-         cp /etc/ipsec.secrets-tmp /etc/ipsec.secrets && \
+         apt-get install -y strongswan-swanctl && \
+         cp /etc/swanctl/swanctl.conf-tmp /etc/swanctl/swanctl.conf && \
          cp /etc/strongswan.conf-tmp /etc/strongswan.conf && \
          ipsec start && \
+         sleep 5 && \
+         swanctl --load-all && \
+         ip link add ipsec0 type xfrm if_id 123
+         ip link set ipsec0 up
+         ip route add 5.6.7.8/32 dev ipsec0
          tail -f /dev/null"]
         securityContext:
           privileged: true
@@ -109,12 +137,9 @@ spec:
             name: vpn-ike
             protocol: UDP
         volumeMounts:
-        - mountPath: /etc/ipsec.conf-tmp
+        - mountPath: /etc/swanctl/swanctl.conf-tmp
           name: config
-          subPath: ipsec.conf
-        - mountPath: /etc/ipsec.secrets-tmp
-          name: config
-          subPath: ipsec.secrets
+          subPath: swanctl.conf
         - mountPath: /etc/strongswan.conf-tmp
           name: config
           subPath: strongswan.conf
@@ -124,33 +149,13 @@ spec:
       volumes:
       - configMap:
           items:
-          - key: ipsec.conf
-            path: ipsec.conf
-          - key: ipsec.secrets
-            path: ipsec.secrets
+          - key: swanctl.conf
+            path: swanctl.conf
           - key: strongswan.conf
             path: strongswan.conf
           name: ipsec-config
         name: config
       restartPolicy: Always
----
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: ipsec-external-pool
-  namespace: metallb-system
-spec:
-  addresses:
-  - 10.123.123.200/32
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: l2-metalb-ipsec
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-  - ipsec-external-pool
 ---
 apiVersion: v1
 kind: Service
@@ -173,4 +178,24 @@ spec:
     targetPort: 4500
   type: LoadBalancer
 ---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: ipsec-external-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 10.123.123.200/32
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-metalb-ipsec
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - ipsec-external-pool
+---
+
+
 
